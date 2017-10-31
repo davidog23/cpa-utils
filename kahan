@@ -1,0 +1,87 @@
+#!/bin/bash
+SOURCE_FOLDER=$(dirname $0)
+QUEUE_FILE="$SOURCE_FOLDER/.kahan_queue"
+log_dir=./logs
+if [[ $1 == "commit" || $1 == "run" ]]
+then
+    if [[ $1 == "commit" ]]
+    then
+        commit=true
+    else
+        commit=false
+    fi
+    shift
+    nThreads=16
+    schedule="static"
+    walltime="00:05:00"
+    POSITIONAL=()
+    while [[ $# -gt 0 ]]
+    do
+        key="$1"
+        case $key in
+            -t|--threads)
+            nThreads="$2"
+            shift
+            shift
+            ;;
+            -n|--name)
+            name="$2"
+            shift
+            shift
+            ;;
+            -o|--output-file)
+            output="$2"
+            shift
+            shift
+            ;;
+            -w|--walltime) #in minutes
+            if [[ ($2 -gt 10) || ($2 -lt 1) ]]
+            then
+                (>&2 echo "Walltime inválido")
+            else
+                walltime=$(printf "00:%02d:00" $2)
+            fi
+            shift
+            shift
+            ;;
+            -s|--schedule)
+            schedule=$2
+            shift
+            shift
+            ;;
+            *)
+            POSITIONAL+=("$key")
+            shift
+            ;;
+        esac
+    done
+    if [[ -z ${name+x} ]] 
+    then
+        name=${POSITIONAL[0]}
+    fi
+    output_option=""
+    if [[ ! -z ${output+x} ]]
+    then
+        output_option=" -o $log_dir/$output"
+    fi
+    POSITIONAL[0]=$(readlink -f "${POSITIONAL[0]}")
+    runner="qsub -q cpa -N $name -j oe$output_option -d . -l nodes=1,walltime=$walltime -v OMP_NUM_THREADS=$nThreads,OMP_SCHEDULE=$schedule <<< \"$POSITIONAL\""
+    if [[ $commit == true ]]
+    then
+        echo $runner >> $QUEUE_FILE
+    else
+        eval $runner
+    fi
+elif [[ $1 == "push" ]] 
+then
+    if [[ ! -d $log_dir ]]
+    then
+        mkdir $log_dir
+    else
+        rm -f "$log_dir"/*
+    fi
+    while read line; do
+        eval $line
+    done < $QUEUE_FILE
+    rm $QUEUE_FILE
+fi
